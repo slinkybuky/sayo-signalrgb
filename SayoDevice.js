@@ -34,14 +34,14 @@ const DEVICES = {
     }
 };
 
-let detectedDevice = null;
-let detectedModel = null;
-let detectedFirmware = null;
+let detectedDevice;
+let detectedModel;
+let detectedFirmware;
 let modelVerified = false;
 let previousPacket = null;
 
 function getDeviceConfig() {
-    return detectedDevice || DEVICES.unknown;
+    return detectedDevice;
 }
 
 function findDevice(model) {
@@ -55,7 +55,7 @@ function findDevice(model) {
 }
 
 export function Name() {
-    return getDeviceConfig().name;
+    return detectedDevice ? detectedDevice.name : "";
 }
 
 export function Publisher() {
@@ -71,11 +71,11 @@ export function ProductId() {
 }
 
 export function ImageUrl() {
-    return getDeviceConfig().image;
+    return detectedDevice ? detectedDevice.image : "";
 }
 
 export function DeviceType() {
-    return "Keyboard";
+    return detectedDevice ? "Keyboard" : "";
 }
 
 export function Type() {
@@ -83,15 +83,15 @@ export function Type() {
 }
 
 export function Size() {
-    return getDeviceConfig().size;
+    return detectedDevice ? detectedDevice.size : [0, 0];
 }
 
 export function LedNames() {
-    return getDeviceConfig().ledNames;
+    return detectedDevice ? detectedDevice.ledNames : [];
 }
 
 export function LedPositions() {
-    return getDeviceConfig().ledPositions;
+    return detectedDevice ? detectedDevice.ledPositions : [];
 }
 
 export function Validate(endpoint) {
@@ -194,7 +194,6 @@ function readModelInfo() {
             }
 
             const bytes = Array.from(response).map(v => v & 0xFF);
-
             const info = parseModelInfo(bytes);
 
             if (info !== null) {
@@ -222,6 +221,11 @@ function readModelInfo() {
 
 function buildLightingPacket(colors) {
     const config = getDeviceConfig();
+
+    if (!config) {
+        return null;
+    }
+
     const data = [];
 
     for (let i = 0; i < config.ledCount; i++) {
@@ -239,9 +243,9 @@ function buildLightingPacket(colors) {
 }
 
 export function Initialize() {
-    detectedDevice = null;
-    detectedModel = null;
-    detectedFirmware = null;
+    detectedDevice = undefined;
+    detectedModel = undefined;
+    detectedFirmware = undefined;
     modelVerified = false;
     previousPacket = null;
 
@@ -270,6 +274,9 @@ export function Initialize() {
         detectedFirmware.toString(16).padStart(4, "0"));
     device.log("LED count: " + detectedDevice.ledCount);
     device.log("Size: " + Size().join("x"));
+    device.log("Name: " + Name());
+    device.log("Image: " + ImageUrl());
+    device.log("LED names: " + LedNames().join(", "));
 }
 
 export function Render() {
@@ -286,6 +293,10 @@ export function Render() {
 
     const packet = buildLightingPacket(colors);
 
+    if (!packet) {
+        return;
+    }
+
     if (
         previousPacket !== null &&
         packet.every((value, index) => value === previousPacket[index])
@@ -299,8 +310,8 @@ export function Render() {
 
 export function Shutdown() {
     previousPacket = null;
-    detectedDevice = null;
-    detectedModel = null;
-    detectedFirmware = null;
+    detectedDevice = undefined;
+    detectedModel = undefined;
+    detectedFirmware = undefined;
     modelVerified = false;
 }
