@@ -141,10 +141,18 @@ function readModelInfo() {
             const firmware = response[offset + 6] |
                              (response[offset + 7] << 8);
 
-            device.log("Detected model: 0x" + model.toString(16).padStart(4, "0"));
-            device.log("Firmware: 0x" + firmware.toString(16).padStart(4, "0"));
+            device.log("Detected model: 0x" +
+                model.toString(16).padStart(4, "0"));
 
-            return model === EXPECTED_MODEL;
+            device.log("Firmware: 0x" +
+                firmware.toString(16).padStart(4, "0"));
+
+            if (model !== EXPECTED_MODEL) {
+                device.log("Model mismatch: expected O3C (0x0004)");
+                return false;
+            }
+
+            return true;
         }
     } catch (error) {
         device.log("Model verification error: " + error);
@@ -159,6 +167,7 @@ function buildLightingPacket(colors) {
 
     for (let i = 0; i < 3; i++) {
         const color = colors[i] || [0, 0, 0];
+
         data.push(
             color[0] & 0xFF,
             color[1] & 0xFF,
