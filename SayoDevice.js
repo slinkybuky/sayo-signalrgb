@@ -6,7 +6,7 @@ const INFO_COMMAND = 0x00;
 
 const DEVICES = {
     o3c: {
-        model: 0x0009,
+        model: 0x0004,
         name: "SayoDevice O3C",
         type: "Keyboard",
         image: "https://raw.githubusercontent.com/slinkybuky/sayo-signalrgb/main/icons/SayoDevice_O3C.png",
@@ -16,7 +16,7 @@ const DEVICES = {
         ledCount: 3
     },
     o3c_pp: {
-        model: 0x0004,
+        model: 0x0009,
         name: "SayoDevice O3C++",
         type: "Keyboard",
         image: "https://raw.githubusercontent.com/slinkybuky/sayo-signalrgb/main/icons/SayoDevice_O3C_PP.png",
