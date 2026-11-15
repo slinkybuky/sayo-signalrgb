@@ -171,7 +171,6 @@ function readModelInfo() {
             }
 
             if (offset < 0 || offset + 7 >= response.length) {
-                device.log("Info read " + (attempt + 1) + ": invalid header");
                 continue;
             }
 
@@ -182,13 +181,8 @@ function readModelInfo() {
             const length = header & 0x3FF;
             const command = response[offset + 2];
 
-            if (
-                length < 12 ||
-                offset + length > response.length ||
-                command !== INFO_COMMAND ||
-                (status !== 0 && status !== 1)
-            ) {
-                device.log("Info read " + (attempt + 1) + ": invalid response");
+            if (length < 12 || command !== INFO_COMMAND ||
+                (status !== 0 && status !== 1)) {
                 continue;
             }
 
