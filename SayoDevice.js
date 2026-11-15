@@ -6,7 +6,7 @@ const INFO_COMMAND = 0x00;
 const LIGHTING_COMMAND = 0x27;
 
 const DEVICES = {
-    0x0004: {
+    0x0005: {
         name: "SayoDevice O3C",
         type: "Keyboard",
         image: "https://raw.githubusercontent.com/slinkybuky/sayo-signalrgb/main/icons/SayoDevice_O3C.png",
