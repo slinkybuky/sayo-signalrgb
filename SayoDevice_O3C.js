@@ -89,7 +89,7 @@ function buildPacket(command, index, data) {
 
 function readModelInfo() {
     if (typeof device.read !== "function") {
-        device.log("Model verification failed: device.read() unavailable");
+        device.log("DIAG: device.read() is unavailable");
         return false;
     }
 
@@ -97,8 +97,9 @@ function readModelInfo() {
 
     try {
         device.write(request, REPORT_LENGTH);
+        device.log("DIAG: Info request sent: " + request.slice(0, 12).map(v => v.toString(16).padStart(2, "0")).join(" "));
     } catch (error) {
-        device.log("Model verification failed: info request write error: " + error);
+        device.log("DIAG: Info request write failed: " + error);
         return false;
     }
 
@@ -109,30 +110,26 @@ function readModelInfo() {
         try {
             result = device.read(buffer, REPORT_LENGTH);
         } catch (error) {
-            device.log("Model verification failed: info read error: " + error);
-            return false;
+            device.log("DIAG: Read " + (attempt + 1) + " threw: " + error);
+            continue;
         }
 
-        let response;
+        const response = Array.isArray(result) ? result : buffer;
+        const bytes = response.slice(0, 24).map(v =>
+            (v & 0xFF).toString(16).padStart(2, "0")
+        ).join(" ");
 
-        if (Array.isArray(result)) {
-            response = result;
-        } else if (typeof result === "number" && result > 0) {
-            response = buffer;
-        } else {
-            for (let i = 0; i < buffer.length; i++) {
-                if (buffer[i] !== 0) {
-                    response = buffer;
-                    break;
-                }
-            }
-        }
-
-        if (!response) continue;
+        device.log(
+            "DIAG: Read " + (attempt + 1) +
+            " | return=" + typeof result +
+            " | length=" + (Array.isArray(result) ? result.length : REPORT_LENGTH) +
+            " | data=" + bytes
+        );
 
         let offset = -1;
 
-        if (response[0] === REPORT_ID && response[1] === ECHO) {
+        if ((response[0] === REPORT_ID || response[0] === 0x22) &&
+            response[1] === ECHO) {
             offset = 4;
         } else if (response[0] === ECHO) {
             offset = 3;
@@ -145,25 +142,29 @@ function readModelInfo() {
         const length = header & 0x3FF;
         const command = response[offset + 2];
 
-        if (length < 12 || command !== INFO_COMMAND || (status !== 0 && status !== 1)) {
+        device.log(
+            "DIAG: Parsed header | status=" + status +
+            " | length=" + length +
+            " | command=0x" + command.toString(16)
+        );
+
+        if (length < 12 || command !== INFO_COMMAND ||
+            (status !== 0 && status !== 1)) {
             continue;
         }
 
-        const model = response[offset + 4] | (response[offset + 5] << 8);
-        const firmware = response[offset + 6] | (response[offset + 7] << 8);
+        const model = response[offset + 4] |
+                      (response[offset + 5] << 8);
+        const firmware = response[offset + 6] |
+                         (response[offset + 7] << 8);
 
-        device.log("Detected model: 0x" + model.toString(16).padStart(4, "0"));
-        device.log("Firmware version: 0x" + firmware.toString(16).padStart(4, "0"));
+        device.log("DIAG: Model=0x" + model.toString(16));
+        device.log("DIAG: Firmware=0x" + firmware.toString(16));
 
-        if (model !== EXPECTED_MODEL) {
-            device.log("Model mismatch: expected O3C (0x0004)");
-            return false;
-        }
-
-        return true;
+        return model === EXPECTED_MODEL;
     }
 
-    device.log("Model verification failed: no valid info response");
+    device.log("DIAG: No valid Info response after 8 reads");
     return false;
 }
 
