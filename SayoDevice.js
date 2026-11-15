@@ -422,19 +422,21 @@ export function Render() {
 
 export function Shutdown() {
     try {
-        const offColors = Array.from(
-            { length: 14 },
-            () => [0x00, 0x00, 0x00]
-        );
+        if (deviceConfig) {
+            const ledCount = deviceConfig.layout.leds.length;
+            const offColors = Array.from(
+                { length: ledCount },
+                () => [0x00, 0x00, 0x00]
+            );
 
-        const packet = buildPacket(
-            LIGHTING_COMMAND,
-            0x00,
-            offColors.flatMap(() => [0x00, 0x00, 0x00, 0xFF])
-        );
+            const packet = buildLightingPacket(offColors);
 
-        device.write(packet, REPORT_LENGTH);
-        device.log("Sent shutdown packet: all LED slots off");
+            device.write(packet, REPORT_LENGTH);
+
+            device.log(
+                "Shutdown: sent LED-off packet for " + ledCount + " LEDs"
+            );
+        }
     } catch (error) {
         device.log("Failed to turn off LEDs: " + error);
     }
