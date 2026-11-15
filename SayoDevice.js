@@ -37,13 +37,22 @@ const DEVICES = {
     }
 };
 
-let deviceConfig;
+// SignalRGB reads metadata before Initialize().
+// Start with the O3C layout, then replace it after identification.
+let deviceName = DEVICES.o3c.name;
+let deviceType = DEVICES.o3c.type;
+let deviceImage = DEVICES.o3c.image;
+let deviceSize = DEVICES.o3c.size;
+let ledNames = DEVICES.o3c.ledNames;
+let ledPositions = DEVICES.o3c.ledPositions;
+
+let deviceConfig = DEVICES.o3c;
 let detectedModel;
 let detectedFirmware;
 let previousPacket;
 
 export function Name() {
-    return deviceConfig?.name;
+    return deviceName;
 }
 
 export function Publisher() {
@@ -59,11 +68,11 @@ export function ProductId() {
 }
 
 export function ImageUrl() {
-    return deviceConfig?.image;
+    return deviceImage;
 }
 
 export function DeviceType() {
-    return deviceConfig?.type;
+    return deviceType;
 }
 
 export function Type() {
@@ -71,20 +80,31 @@ export function Type() {
 }
 
 export function Size() {
-    return deviceConfig?.size;
+    return deviceSize;
 }
 
 export function LedNames() {
-    return deviceConfig?.ledNames;
+    return ledNames;
 }
 
 export function LedPositions() {
-    return deviceConfig?.ledPositions;
+    return ledPositions;
 }
 
 export function Validate(endpoint) {
     return endpoint.usage_page === 0xFF11 &&
            endpoint.usage === 0x0002;
+}
+
+function applyDeviceConfig(config) {
+    deviceConfig = config;
+
+    deviceName = config.name;
+    deviceType = config.type;
+    deviceImage = config.image;
+    deviceSize = config.size;
+    ledNames = config.ledNames;
+    ledPositions = config.ledPositions;
 }
 
 function buildPacket(command, index, data) {
@@ -237,7 +257,6 @@ function buildLightingPacket(colors) {
 }
 
 export function Initialize() {
-    deviceConfig = undefined;
     detectedModel = undefined;
     detectedFirmware = undefined;
     previousPacket = undefined;
@@ -253,19 +272,24 @@ export function Initialize() {
 
     detectedModel = info.model;
     detectedFirmware = info.firmware;
-    deviceConfig = findDevice(detectedModel);
+
+    applyDeviceConfig(findDevice(detectedModel));
 
     if (deviceConfig === DEVICES.unknown) {
         device.log("Unrecognized model; using generic configuration");
     }
 
-    device.log("Initialized: " + deviceConfig.name);
+    device.log("Initialized: " + Name());
+    device.log("Image: " + ImageUrl());
+    device.log("Device type: " + DeviceType());
     device.log("Model ID: 0x" +
         detectedModel.toString(16).padStart(4, "0"));
     device.log("Firmware: 0x" +
         detectedFirmware.toString(16).padStart(4, "0"));
     device.log("LED count: " + deviceConfig.ledCount);
-    device.log("Size: " + deviceConfig.size.join("x"));
+    device.log("Size: " + Size().join("x"));
+    device.log("LED names: " + LedNames().join(", "));
+    device.log("LED positions: " + JSON.stringify(LedPositions()));
 }
 
 export function Render() {
@@ -276,7 +300,8 @@ export function Render() {
     const colors = [];
 
     for (let i = 0; i < deviceConfig.ledCount; i++) {
-        colors.push(device.color(i, 0));
+        const [x, y] = ledPositions[i];
+        colors.push(device.color(x, y));
     }
 
     const packet = buildLightingPacket(colors);
@@ -294,7 +319,7 @@ export function Render() {
 
 export function Shutdown() {
     previousPacket = undefined;
-    deviceConfig = undefined;
     detectedModel = undefined;
     detectedFirmware = undefined;
+    applyDeviceConfig(DEVICES.o3c);
 }
