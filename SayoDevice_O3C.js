@@ -89,82 +89,68 @@ function buildPacket(command, index, data) {
 
 function readModelInfo() {
     if (typeof device.read !== "function") {
-        device.log("DIAG: device.read() is unavailable");
+        device.log("Model verification failed: device.read() unavailable");
         return false;
     }
-
-    const request = buildPacket(INFO_COMMAND, 0x00, []);
 
     try {
+        if (typeof device.clearReadBuffer === "function") {
+            device.clearReadBuffer();
+        }
+
+        const request = buildPacket(INFO_COMMAND, 0x00, []);
         device.write(request, REPORT_LENGTH);
-        device.log("DIAG: Info request sent: " + request.slice(0, 12).map(v => v.toString(16).padStart(2, "0")).join(" "));
+
+        device.log("Info request sent");
+
+        for (let attempt = 0; attempt < 3; attempt++) {
+            const response = device.read([REPORT_ID], REPORT_LENGTH, 100);
+
+            if (!response || response.length < 12) {
+                device.log("Info read " + (attempt + 1) + ": no response");
+                continue;
+            }
+
+            device.log("Info response: " + response.slice(0, 20).map(v =>
+                (v & 0xFF).toString(16).padStart(2, "0")
+            ).join(" "));
+
+            let offset = -1;
+
+            if (response[0] === REPORT_ID && response[1] === ECHO) {
+                offset = 4;
+            } else if (response[0] === ECHO) {
+                offset = 3;
+            }
+
+            if (offset < 0 || offset + 7 >= response.length) continue;
+
+            const header = response[offset] | (response[offset + 1] << 8);
+            const status = header >>> 10;
+            const length = header & 0x3FF;
+            const command = response[offset + 2];
+
+            if (length < 12 || command !== INFO_COMMAND ||
+                (status !== 0 && status !== 1)) {
+                continue;
+            }
+
+            const model = response[offset + 4] |
+                          (response[offset + 5] << 8);
+
+            const firmware = response[offset + 6] |
+                             (response[offset + 7] << 8);
+
+            device.log("Detected model: 0x" + model.toString(16).padStart(4, "0"));
+            device.log("Firmware: 0x" + firmware.toString(16).padStart(4, "0"));
+
+            return model === EXPECTED_MODEL;
+        }
     } catch (error) {
-        device.log("DIAG: Info request write failed: " + error);
-        return false;
+        device.log("Model verification error: " + error);
     }
 
-    for (let attempt = 0; attempt < 8; attempt++) {
-        const buffer = new Array(REPORT_LENGTH).fill(0);
-        let result;
-
-        try {
-            result = device.read(buffer, REPORT_LENGTH);
-        } catch (error) {
-            device.log("DIAG: Read " + (attempt + 1) + " threw: " + error);
-            continue;
-        }
-
-        const response = Array.isArray(result) ? result : buffer;
-        const bytes = response.slice(0, 24).map(v =>
-            (v & 0xFF).toString(16).padStart(2, "0")
-        ).join(" ");
-
-        device.log(
-            "DIAG: Read " + (attempt + 1) +
-            " | return=" + typeof result +
-            " | length=" + (Array.isArray(result) ? result.length : REPORT_LENGTH) +
-            " | data=" + bytes
-        );
-
-        let offset = -1;
-
-        if ((response[0] === REPORT_ID || response[0] === 0x22) &&
-            response[1] === ECHO) {
-            offset = 4;
-        } else if (response[0] === ECHO) {
-            offset = 3;
-        }
-
-        if (offset < 0 || offset + 7 >= response.length) continue;
-
-        const header = response[offset] | (response[offset + 1] << 8);
-        const status = header >>> 10;
-        const length = header & 0x3FF;
-        const command = response[offset + 2];
-
-        device.log(
-            "DIAG: Parsed header | status=" + status +
-            " | length=" + length +
-            " | command=0x" + command.toString(16)
-        );
-
-        if (length < 12 || command !== INFO_COMMAND ||
-            (status !== 0 && status !== 1)) {
-            continue;
-        }
-
-        const model = response[offset + 4] |
-                      (response[offset + 5] << 8);
-        const firmware = response[offset + 6] |
-                         (response[offset + 7] << 8);
-
-        device.log("DIAG: Model=0x" + model.toString(16));
-        device.log("DIAG: Firmware=0x" + firmware.toString(16));
-
-        return model === EXPECTED_MODEL;
-    }
-
-    device.log("DIAG: No valid Info response after 8 reads");
+    device.log("Model verification failed");
     return false;
 }
 
