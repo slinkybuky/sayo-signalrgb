@@ -28,6 +28,18 @@ const DEVICES = {
             positions: [[0, 0], [1, 0], [2, 0], [3, 0]],
             leds: [0, 1, 2, 3]
         }
+    },
+
+    unknown: {
+        name: "Unknown SayoDevice",
+        type: "Keyboard",
+        image: "https://raw.githubusercontent.com/slinkybuky/sayo-signalrgb/main/icons/Unknown_SayoDevice.png",
+        layout: {
+            size: [1, 1],
+            names: ["LED 1"],
+            positions: [[0, 0]],
+            leds: [0]
+        }
     }
 };
 
@@ -352,14 +364,13 @@ export function Initialize() {
         "Firmware: 0x" + detectedFirmware.toString(16).padStart(4, "0")
     );
 
-    const config = DEVICES[detectedModel];
+    const config = DEVICES[detectedModel] || DEVICES.unknown;
 
-    if (!config) {
+    if (config === DEVICES.unknown) {
         device.log(
-            "Unsupported SayoDevice model: 0x" +
+            "Unrecognized SayoDevice model: 0x" +
             detectedModel.toString(16).padStart(4, "0")
         );
-        return;
     }
 
     if (!applyDeviceConfig(config)) {
@@ -410,22 +421,22 @@ export function Render() {
 }
 
 export function Shutdown() {
-    if (deviceConfig) {
-        try {
-            const ledCount = deviceConfig.layout.leds.length;
-            const offColors = Array.from(
-                { length: ledCount },
-                () => [0x00, 0x00, 0x00]
-            );
+    try {
+        const offColors = Array.from(
+            { length: 14 },
+            () => [0x00, 0x00, 0x00]
+        );
 
-            const packet = buildLightingPacket(offColors);
+        const packet = buildPacket(
+            LIGHTING_COMMAND,
+            0x00,
+            offColors.flatMap(() => [0x00, 0x00, 0x00, 0xFF])
+        );
 
-            device.write(packet, REPORT_LENGTH);
-
-            device.log("Sent shutdown packet: all LEDs off");
-        } catch (error) {
-            device.log("Failed to turn off LEDs during shutdown: " + error);
-        }
+        device.write(packet, REPORT_LENGTH);
+        device.log("Sent shutdown packet: all LED slots off");
+    } catch (error) {
+        device.log("Failed to turn off LEDs: " + error);
     }
 
     previousPacket = null;
