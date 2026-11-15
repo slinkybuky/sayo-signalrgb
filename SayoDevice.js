@@ -4,38 +4,54 @@ const ECHO = 0x03;
 const COMMAND = 0x27;
 const INFO_COMMAND = 0x00;
 
-const MODEL_O3C = 0x0004;
-const MODEL_O3C_PP = 0x0009;
-
 const DEVICES = {
-    [MODEL_O3C]: {
+    o3c: {
+        model: 0x0004,
         name: "SayoDevice O3C",
-        image: "https://raw.githubusercontent.com/slinkybuky/o3c-signalrgb/main/icons/SayoDevice_O3C.png",
+        image: "https://raw.githubusercontent.com/slinkybuky/sayo-signalrgb/main/icons/SayoDevice_O3C.png",
         size: [3, 1],
         ledNames: ["Key 1", "Key 2", "Key 3"],
         ledPositions: [[0, 0], [1, 0], [2, 0]],
         ledCount: 3
     },
-    [MODEL_O3C_PP]: {
+    o3c_pp: {
+        model: 0x0009,
         name: "SayoDevice O3C++",
-        image: "https://raw.githubusercontent.com/slinkybuky/o3c-signalrgb/main/icons/SayoDevice_O3C_PP.png",
+        image: "https://raw.githubusercontent.com/slinkybuky/sayo-signalrgb/main/icons/SayoDevice_O3C_PP.png",
         size: [4, 1],
         ledNames: ["Key 1", "Key 2", "Key 3", "Key 4"],
         ledPositions: [[0, 0], [1, 0], [2, 0], [3, 0]],
         ledCount: 4
+    },
+    unknown: {
+        model: null,
+        name: "Unknown SayoDevice",
+        image: "https://raw.githubusercontent.com/slinkybuky/sayo-signalrgb/main/icons/Unknown_SayoDevice.png",
+        size: [1, 1],
+        ledNames: ["LED 1"],
+        ledPositions: [[0, 0]],
+        ledCount: 1
     }
 };
 
+let detectedDevice = null;
 let detectedModel = null;
 let modelVerified = false;
 let previousPacket = null;
 
 function getDeviceConfig() {
-    return DEVICES[detectedModel] || DEVICES[MODEL_O3C];
+    return detectedDevice;
+}
+
+function findDevice(model) {
+    return Object.values(DEVICES).find(config =>
+        config.model !== null && config.model === model
+    ) || DEVICES.unknown;
 }
 
 export function Name() {
-    return getDeviceConfig().name;
+    const config = getDeviceConfig();
+    return config ? config.name : "";
 }
 
 export function Publisher() {
@@ -51,7 +67,8 @@ export function ProductId() {
 }
 
 export function ImageUrl() {
-    return getDeviceConfig().image;
+    const config = getDeviceConfig();
+    return config ? config.image : "";
 }
 
 export function DeviceType() {
@@ -63,15 +80,18 @@ export function Type() {
 }
 
 export function Size() {
-    return getDeviceConfig().size;
+    const config = getDeviceConfig();
+    return config ? config.size : [0, 0];
 }
 
 export function LedNames() {
-    return getDeviceConfig().ledNames;
+    const config = getDeviceConfig();
+    return config ? config.ledNames : [];
 }
 
 export function LedPositions() {
-    return getDeviceConfig().ledPositions;
+    const config = getDeviceConfig();
+    return config ? config.ledPositions : [];
 }
 
 export function Validate(endpoint) {
@@ -149,6 +169,7 @@ function readModelInfo() {
             }
 
             if (offset < 0 || offset + 7 >= response.length) {
+                device.log("Info read " + (attempt + 1) + ": invalid header");
                 continue;
             }
 
@@ -159,8 +180,13 @@ function readModelInfo() {
             const length = header & 0x3FF;
             const command = response[offset + 2];
 
-            if (length < 12 || command !== INFO_COMMAND ||
-                (status !== 0 && status !== 1)) {
+            if (
+                length < 12 ||
+                offset + length > response.length ||
+                command !== INFO_COMMAND ||
+                (status !== 0 && status !== 1)
+            ) {
+                device.log("Info read " + (attempt + 1) + ": invalid response");
                 continue;
             }
 
@@ -188,6 +214,11 @@ function readModelInfo() {
 
 function buildLightingPacket(colors) {
     const config = getDeviceConfig();
+
+    if (!config) {
+        return null;
+    }
+
     const data = [];
 
     for (let i = 0; i < config.ledCount; i++) {
@@ -205,25 +236,33 @@ function buildLightingPacket(colors) {
 }
 
 export function Initialize() {
+    detectedDevice = null;
     detectedModel = null;
     modelVerified = false;
     previousPacket = null;
 
-    device.log("Identifying SayoDevice O3C series...");
+    device.log("Identifying SayoDevice...");
 
     const model = readModelInfo();
 
-    if (model === null || !DEVICES[model]) {
-        device.log("Unsupported SayoDevice model; lighting disabled");
+    if (model === null) {
+        device.log("No valid SayoDevice identification; ignoring device");
         return;
     }
 
     detectedModel = model;
+    detectedDevice = findDevice(model);
     modelVerified = true;
 
     const config = getDeviceConfig();
 
+    if (config === DEVICES.unknown) {
+        device.log("Unrecognized SayoDevice model");
+        device.log("Using generic lighting configuration");
+    }
+
     device.log("Initialized: " + config.name);
+    device.log("Model: 0x" + model.toString(16).padStart(4, "0"));
     device.log("LED count: " + config.ledCount);
     device.log("Refreshing device metadata...");
 
@@ -234,7 +273,9 @@ export function Initialize() {
 }
 
 export function Render() {
-    if (!modelVerified) return;
+    if (!modelVerified || !detectedDevice) {
+        return;
+    }
 
     const config = getDeviceConfig();
     const colors = [];
@@ -245,8 +286,14 @@ export function Render() {
 
     const packet = buildLightingPacket(colors);
 
-    if (previousPacket !== null &&
-        packet.every((value, index) => value === previousPacket[index])) {
+    if (!packet) {
+        return;
+    }
+
+    if (
+        previousPacket !== null &&
+        packet.every((value, index) => value === previousPacket[index])
+    ) {
         return;
     }
 
@@ -256,6 +303,7 @@ export function Render() {
 
 export function Shutdown() {
     previousPacket = null;
+    detectedDevice = null;
     detectedModel = null;
     modelVerified = false;
 }
