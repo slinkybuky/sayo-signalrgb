@@ -1,7 +1,7 @@
 const REPORT_LENGTH = 64;
 const REPORT_ID = 0x21;
 const ECHO = 0x03;
-const COMMAND = 0x27;
+const LIGHTING_COMMAND = 0x27;
 const INFO_COMMAND = 0x00;
 
 const DEVICES = {
@@ -27,33 +27,35 @@ const DEVICES = {
         model: null,
         name: "Unknown SayoDevice",
         image: "https://raw.githubusercontent.com/slinkybuky/sayo-signalrgb/main/icons/Unknown_SayoDevice.png",
-        size: [1, 1],
-        ledNames: ["LED 1"],
-        ledPositions: [[0, 0]],
-        ledCount: 1
+        size: [4, 1],
+        ledNames: ["LED 1", "LED 2", "LED 3", "LED 4"],
+        ledPositions: [[0, 0], [1, 0], [2, 0], [3, 0]],
+        ledCount: 4
     }
 };
 
 let detectedDevice = null;
 let detectedModel = null;
+let detectedFirmware = null;
 let modelVerified = false;
 let previousPacket = null;
 
 function getDeviceConfig() {
-    return detectedDevice;
+    return detectedDevice || DEVICES.unknown;
 }
 
 function findDevice(model) {
-    if (model === null || model === undefined) return null;
+    for (const config of Object.values(DEVICES)) {
+        if (config.model === model) {
+            return config;
+        }
+    }
 
-    return Object.values(DEVICES).find(config =>
-        config.model !== null && config.model === model
-    ) || DEVICES.unknown;
+    return DEVICES.unknown;
 }
 
 export function Name() {
-    const config = getDeviceConfig();
-    return config ? config.name : "";
+    return getDeviceConfig().name;
 }
 
 export function Publisher() {
@@ -69,8 +71,7 @@ export function ProductId() {
 }
 
 export function ImageUrl() {
-    const config = getDeviceConfig();
-    return config ? config.image : "";
+    return getDeviceConfig().image;
 }
 
 export function DeviceType() {
@@ -82,18 +83,15 @@ export function Type() {
 }
 
 export function Size() {
-    const config = getDeviceConfig();
-    return config ? config.size : [0, 0];
+    return getDeviceConfig().size;
 }
 
 export function LedNames() {
-    const config = getDeviceConfig();
-    return config ? config.ledNames : [];
+    return getDeviceConfig().ledNames;
 }
 
 export function LedPositions() {
-    const config = getDeviceConfig();
-    return config ? config.ledPositions : [];
+    return getDeviceConfig().ledPositions;
 }
 
 export function Validate(endpoint) {
@@ -106,10 +104,8 @@ function buildPacket(command, index, data) {
 
     packet[0] = REPORT_ID;
     packet[1] = ECHO;
-
-    const length = data.length + 4;
-    packet[4] = length & 0xFF;
-    packet[5] = (length >> 8) & 0xFF;
+    packet[4] = (data.length + 4) & 0xFF;
+    packet[5] = ((data.length + 4) >> 8) & 0xFF;
     packet[6] = command;
     packet[7] = index;
 
@@ -117,26 +113,62 @@ function buildPacket(command, index, data) {
         packet[8 + i] = data[i] & 0xFF;
     }
 
-    packet[2] = 0;
-    packet[3] = 0;
-
-    let sum = 0;
+    let checksum = 0;
 
     for (let i = 0; i < REPORT_LENGTH; i += 2) {
-        sum += packet[i] | ((packet[i + 1] ?? 0) << 8);
+        checksum += packet[i] | (packet[i + 1] << 8);
     }
 
-    sum &= 0xFFFF;
+    checksum &= 0xFFFF;
 
-    packet[2] = sum & 0xFF;
-    packet[3] = (sum >> 8) & 0xFF;
+    packet[2] = checksum & 0xFF;
+    packet[3] = (checksum >> 8) & 0xFF;
 
     return packet;
 }
 
+function parseModelInfo(response) {
+    if (!response || response.length < 12) {
+        return null;
+    }
+
+    let offset = -1;
+
+    if (response[0] === REPORT_ID && response[1] === ECHO) {
+        offset = 4;
+    } else if (response[0] === ECHO) {
+        offset = 3;
+    }
+
+    if (offset < 0 || response.length < offset + 8) {
+        return null;
+    }
+
+    const header = response[offset] |
+                   (response[offset + 1] << 8);
+
+    const status = header >>> 10;
+    const length = header & 0x03FF;
+    const command = response[offset + 2];
+
+    if (length < 12 || length > REPORT_LENGTH - offset ||
+        command !== INFO_COMMAND ||
+        (status !== 0 && status !== 1)) {
+        return null;
+    }
+
+    const model = response[offset + 4] |
+                  (response[offset + 5] << 8);
+
+    const firmware = response[offset + 6] |
+                     (response[offset + 7] << 8);
+
+    return { model, firmware };
+}
+
 function readModelInfo() {
     if (typeof device.read !== "function") {
-        device.log("Model verification failed: device.read() unavailable");
+        device.log("Identification failed: device.read() unavailable");
         return null;
     }
 
@@ -146,75 +178,50 @@ function readModelInfo() {
         }
 
         const request = buildPacket(INFO_COMMAND, 0x00, []);
+
+        device.log("Sending SayoDevice info request");
+        device.log("Request: " + request.slice(0, 8).map(v =>
+            v.toString(16).padStart(2, "0")
+        ).join(" "));
+
         device.write(request, REPORT_LENGTH);
 
-        device.log("SayoDevice info request sent");
+        for (let attempt = 0; attempt < 20; attempt++) {
+            const response = device.read([REPORT_ID], REPORT_LENGTH, 250);
 
-        for (let attempt = 0; attempt < 3; attempt++) {
-            const response = device.read([REPORT_ID], REPORT_LENGTH, 100);
-
-            if (!response || response.length < 12) {
-                device.log("Info read " + (attempt + 1) + ": no response");
+            if (!response || response.length === 0) {
                 continue;
             }
 
-            device.log("Info response: " + response.slice(0, 20).map(v =>
-                (v & 0xFF).toString(16).padStart(2, "0")
-            ).join(" "));
+            const bytes = Array.from(response).map(v => v & 0xFF);
 
-            let offset = -1;
+            const info = parseModelInfo(bytes);
 
-            if (response[0] === REPORT_ID && response[1] === ECHO) {
-                offset = 4;
-            } else if (response[0] === ECHO) {
-                offset = 3;
+            if (info !== null) {
+                device.log("Valid info response received");
+                device.log("Model: 0x" +
+                    info.model.toString(16).padStart(4, "0"));
+                device.log("Firmware: 0x" +
+                    info.firmware.toString(16).padStart(4, "0"));
+
+                return info;
             }
 
-            if (offset < 0 || offset + 7 >= response.length) {
-                continue;
-            }
-
-            const header = response[offset] |
-                           (response[offset + 1] << 8);
-
-            const status = header >>> 10;
-            const length = header & 0x3FF;
-            const command = response[offset + 2];
-
-            if (length < 12 || command !== INFO_COMMAND ||
-                (status !== 0 && status !== 1)) {
-                continue;
-            }
-
-            const model = response[offset + 4] |
-                          (response[offset + 5] << 8);
-
-            const firmware = response[offset + 6] |
-                             (response[offset + 7] << 8);
-
-            device.log("Detected model: 0x" +
-                model.toString(16).padStart(4, "0"));
-
-            device.log("Firmware: 0x" +
-                firmware.toString(16).padStart(4, "0"));
-
-            return model;
+            device.log("Ignoring unrelated HID response: " +
+                bytes.slice(0, 8).map(v =>
+                    v.toString(16).padStart(2, "0")
+                ).join(" "));
         }
     } catch (error) {
-        device.log("Model verification error: " + error);
+        device.log("Identification error: " + error);
     }
 
-    device.log("Model verification failed");
+    device.log("No valid model-info response received");
     return null;
 }
 
 function buildLightingPacket(colors) {
     const config = getDeviceConfig();
-
-    if (!config) {
-        return null;
-    }
-
     const data = [];
 
     for (let i = 0; i < config.ledCount; i++) {
@@ -228,44 +235,41 @@ function buildLightingPacket(colors) {
         );
     }
 
-    return buildPacket(COMMAND, 0x00, data);
+    return buildPacket(LIGHTING_COMMAND, 0x00, data);
 }
 
 export function Initialize() {
     detectedDevice = null;
     detectedModel = null;
+    detectedFirmware = null;
     modelVerified = false;
     previousPacket = null;
 
     device.log("Identifying SayoDevice...");
 
-    const model = readModelInfo();
+    const info = readModelInfo();
 
-    if (model === null) {
-        device.log("No valid SayoDevice identification; ignoring device");
+    if (info === null) {
+        device.log("Device identification unsuccessful");
         return;
     }
 
-    detectedModel = model;
-    detectedDevice = findDevice(model);
+    detectedModel = info.model;
+    detectedFirmware = info.firmware;
+    detectedDevice = findDevice(detectedModel);
     modelVerified = true;
 
-    const config = getDeviceConfig();
-
-    if (config === DEVICES.unknown) {
-        device.log("Unrecognized SayoDevice model");
-        device.log("Using generic lighting configuration");
+    if (detectedDevice === DEVICES.unknown) {
+        device.log("Unrecognized model; using generic configuration");
     }
 
-    device.log("Initialized: " + config.name);
-    device.log("Model: 0x" + model.toString(16).padStart(4, "0"));
-    device.log("LED count: " + config.ledCount);
-    device.log("Refreshing device metadata...");
-
-    device.log("Name: " + Name());
-    device.log("Image: " + ImageUrl());
+    device.log("Initialized: " + detectedDevice.name);
+    device.log("Model ID: 0x" +
+        detectedModel.toString(16).padStart(4, "0"));
+    device.log("Firmware: 0x" +
+        detectedFirmware.toString(16).padStart(4, "0"));
+    device.log("LED count: " + detectedDevice.ledCount);
     device.log("Size: " + Size().join("x"));
-    device.log("LED names: " + LedNames().join(", "));
 }
 
 export function Render() {
@@ -282,10 +286,6 @@ export function Render() {
 
     const packet = buildLightingPacket(colors);
 
-    if (!packet) {
-        return;
-    }
-
     if (
         previousPacket !== null &&
         packet.every((value, index) => value === previousPacket[index])
@@ -301,5 +301,6 @@ export function Shutdown() {
     previousPacket = null;
     detectedDevice = null;
     detectedModel = null;
+    detectedFirmware = null;
     modelVerified = false;
 }
