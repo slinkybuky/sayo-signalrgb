@@ -44,6 +44,8 @@ function getDeviceConfig() {
 }
 
 function findDevice(model) {
+    if (model === null || model === undefined) return null;
+
     return Object.values(DEVICES).find(config =>
         config.model !== null && config.model === model
     ) || DEVICES.unknown;
